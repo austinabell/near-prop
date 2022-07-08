@@ -177,10 +177,10 @@ macro_rules! testable_fn {
     ($($name: ident),*) => {
 
 #[async_trait]
-impl<T, R, $($name: Arbitrary + Debug + UnwindSafe + Send + Sync),*> Testable for fn($($name),*) -> R
+impl<T, R, $($name: Arbitrary + Debug + Send + Sync),*> Testable for fn($($name),*) -> R
 where
     T: Testable + Send + Sync,
-    R: Future<Output = T> + 'static + Send + UnwindSafe,
+    R: Future<Output = T> + 'static + Send,
 {
     #[allow(non_snake_case)]
     async fn result(&self, g: &mut Gen) -> TestResult {
@@ -188,14 +188,14 @@ where
         async fn shrink_failure<
             T: Testable + Send + Sync,
             R,
-            $($name: Arbitrary + Debug + UnwindSafe + Send + Sync),*
+            $($name: Arbitrary + Debug + Send + Sync),*
         >(
             g: &mut Gen,
             self_: fn($($name),*) -> R,
             a: ($($name,)*),
         ) -> Option<TestResult>
         where
-            R: Future<Output = T> + 'static + Send + UnwindSafe,
+            R: Future<Output = T> + 'static + Send,
         {
             let shrunk = a.shrink().collect::<Vec<_>>();
             for t in shrunk {
@@ -254,11 +254,11 @@ testable_fn!(A, B, C, D, E, F, G, H);
 
 async fn safe_async<T, F, R>(fun: F) -> Result<T, String>
 where
-    F: FnOnce() -> R + 'static + UnwindSafe,
+    F: FnOnce() -> R + 'static,
     T: 'static,
-    R: Future<Output = T> + UnwindSafe,
+    R: Future<Output = T>,
 {
-    async { panic::AssertUnwindSafe(fun)().await }
+    panic::AssertUnwindSafe(async { panic::AssertUnwindSafe(fun)().await })
         .catch_unwind()
         .await
         .map_err(|any_err| {
