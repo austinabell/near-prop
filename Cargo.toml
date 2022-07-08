@@ -3,6 +3,9 @@ name = "near-prop"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+exclude = ["examples/"]
+
 [features]
 default = ["regex", "use_logging"]
 use_logging = ["log", "env_logger"]
