@@ -173,39 +173,41 @@ fn debug_reprs(args: &[&dyn Debug]) -> Vec<String> {
     args.iter().map(|x| format!("{:?}", x)).collect()
 }
 
+macro_rules! testable_fn {
+    ($($name: ident),*) => {
+
 #[async_trait]
-impl<T, P, F> Testable for fn(P) -> F
+impl<T, R, $($name: Arbitrary + Debug + UnwindSafe + Send + Sync),*> Testable for fn($($name),*) -> R
 where
     T: Testable + Send + Sync,
-    F: Future<Output = T> + 'static + Send + UnwindSafe,
-    P: Arbitrary + Debug + UnwindSafe + Send + Sync,
+    R: Future<Output = T> + 'static + Send + UnwindSafe,
 {
     #[allow(non_snake_case)]
     async fn result(&self, g: &mut Gen) -> TestResult {
         #[async_recursion]
         async fn shrink_failure<
             T: Testable + Send + Sync,
-            F,
-            P: Arbitrary + Debug + UnwindSafe + Send + Sync,
+            R,
+            $($name: Arbitrary + Debug + UnwindSafe + Send + Sync),*
         >(
             g: &mut Gen,
-            self_: fn(P) -> F,
-            a: (P,),
+            self_: fn($($name),*) -> R,
+            a: ($($name,)*),
         ) -> Option<TestResult>
         where
-            F: Future<Output = T> + 'static + Send + UnwindSafe,
+            R: Future<Output = T> + 'static + Send + UnwindSafe,
         {
             let shrunk = a.shrink().collect::<Vec<_>>();
             for t in shrunk {
-                let (p,) = t.clone();
-                let mut r_new = safe_async(async move || self_(p).await)
+                let ($($name,)*) = t.clone();
+                let mut r_new = safe_async(async move || self_($($name,)*).await)
                     .await
                     .result(g)
                     .await;
                 if r_new.is_failure() {
                     {
-                        let (ref p,): (P,) = t;
-                        r_new.arguments = debug_reprs(&[p]);
+                        let ($(ref $name,)*): ($($name,)*) = t;
+                        r_new.arguments = debug_reprs(&[$($name),*]);
                     }
 
                     // The shrunk value *does* witness a failure, so keep
@@ -221,16 +223,16 @@ where
         }
 
         let self_ = *self;
-        let a: (P,) = Arbitrary::arbitrary(g);
-        let (p,) = a.clone();
-        let mut r = safe_async(async move || self_(p).await)
+        let a: ($($name,)*) = Arbitrary::arbitrary(g);
+        let ($($name,)*) = a.clone();
+        let mut r = safe_async(async move || self_($($name),*).await)
             .await
             .result(g)
             .await;
 
         {
-            let (ref a,) = a;
-            r.arguments = debug_reprs(&[a]);
+            let ($(ref $name,)*) = a;
+            r.arguments = debug_reprs(&[$($name),*]);
         }
         match r.status {
             Status::Pass | Status::Discard => r,
@@ -238,67 +240,17 @@ where
         }
     }
 }
+}}
 
-// macro_rules! testable_fn {
-//     ($($name: ident),*) => {
-
-// impl<T: Testable,
-//      $($name: Arbitrary + Debug),*> Testable for fn($($name),*) -> T {
-//     #[allow(non_snake_case)]
-//     fn result(&self, g: &mut Gen) -> TestResult {
-//         fn shrink_failure<T: Testable, $($name: Arbitrary + Debug),*>(
-//             g: &mut Gen,
-//             self_: fn($($name),*) -> T,
-//             a: ($($name,)*),
-//         ) -> Option<TestResult> {
-//             for t in a.shrink() {
-//                 let ($($name,)*) = t.clone();
-//                 let mut r_new = safe(move || {self_($($name),*)}).result(g);
-//                 if r_new.is_failure() {
-//                     {
-//                         let ($(ref $name,)*) : ($($name,)*) = t;
-//                         r_new.arguments = debug_reprs(&[$($name),*]);
-//                     }
-
-//                     // The shrunk value *does* witness a failure, so keep
-//                     // trying to shrink it.
-//                     let shrunk = shrink_failure(g, self_, t);
-
-//                     // If we couldn't witness a failure on any shrunk value,
-//                     // then return the failure we already have.
-//                     return Some(shrunk.unwrap_or(r_new))
-//                 }
-//             }
-//             None
-//         }
-
-//         let self_ = *self;
-//         let a: ($($name,)*) = Arbitrary::arbitrary(g);
-//         let ( $($name,)* ) = a.clone();
-//         let mut r = safe(move || {self_($($name),*)}).result(g);
-
-//         {
-//             let ( $(ref $name,)* ) = a;
-//             r.arguments = debug_reprs(&[$($name),*]);
-//         }
-//         match r.status {
-//             Status::Pass|Status::Discard => r,
-//             Status::Fail => {
-//                 shrink_failure(g, self_, a).unwrap_or(r)
-//             }
-//         }
-//     }
-// }}}
-
-// testable_fn!();
-// testable_fn!(A);
-// testable_fn!(A, B);
-// testable_fn!(A, B, C);
-// testable_fn!(A, B, C, D);
-// testable_fn!(A, B, C, D, E);
-// testable_fn!(A, B, C, D, E, F);
-// testable_fn!(A, B, C, D, E, F, G);
-// testable_fn!(A, B, C, D, E, F, G, H);
+testable_fn!();
+testable_fn!(A);
+testable_fn!(A, B);
+testable_fn!(A, B, C);
+testable_fn!(A, B, C, D);
+testable_fn!(A, B, C, D, E);
+testable_fn!(A, B, C, D, E, F);
+testable_fn!(A, B, C, D, E, F, G);
+testable_fn!(A, B, C, D, E, F, G, H);
 
 async fn safe_async<T, F, R>(fun: F) -> Result<T, String>
 where
