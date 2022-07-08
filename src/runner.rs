@@ -71,8 +71,7 @@ impl TestResult {
     /// `f` generates a task failure during its execution.
     pub fn must_fail<T, F>(f: F) -> TestResult
     where
-        F: FnOnce() -> T,
-        F: 'static,
+        F: FnOnce() -> T + 'static,
         T: 'static,
     {
         let f = panic::AssertUnwindSafe(f);
