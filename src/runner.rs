@@ -123,7 +123,9 @@ impl NearProp {
     {
         // TODO paralellize this
         let mut n_tests_passed = 0;
-        for _ in 0..self.max_tests {
+        for i in 0..self.max_tests {
+            // TODO remove, used for debugging
+            super::info!("RAN TEST {}", i);
             if n_tests_passed >= self.tests {
                 break;
             }
@@ -197,8 +199,8 @@ impl NearProp {
 
 /// Convenience function for running NearProp.
 ///
-/// This is an alias for `NearProp::new().test(f)`.
-pub async fn prop<A: Testable>(f: A) {
+/// This is an alias for `NearProp::default().test(f)`.
+pub async fn prop_test<A: Testable>(f: A) {
     NearProp::default().test(f).await
 }
 
