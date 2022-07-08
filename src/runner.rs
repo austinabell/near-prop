@@ -5,8 +5,191 @@ use futures::FutureExt;
 use quickcheck::{Arbitrary, Gen};
 use std::fmt::Debug;
 use std::future::Future;
-use std::panic;
 use std::pin::Pin;
+use std::{cmp, env, panic};
+
+/// The main NearProp type for setting configuration and running NearProp.
+pub struct NearProp {
+    tests: u64,
+    max_tests: u64,
+    min_tests_passed: u64,
+    gen: Gen,
+}
+
+fn qc_tests() -> u64 {
+    let default = 100;
+    match env::var("NEARPROP_TESTS") {
+        Ok(val) => val.parse().unwrap_or(default),
+        Err(_) => default,
+    }
+}
+
+fn qc_max_tests() -> u64 {
+    let default = 10_000;
+    match env::var("NEARPROP_MAX_TESTS") {
+        Ok(val) => val.parse().unwrap_or(default),
+        Err(_) => default,
+    }
+}
+
+fn qc_gen_size() -> usize {
+    let default = 100;
+    match env::var("NEARPROP_GENERATOR_SIZE") {
+        Ok(val) => val.parse().unwrap_or(default),
+        Err(_) => default,
+    }
+}
+
+fn qc_min_tests_passed() -> u64 {
+    let default = 0;
+    match env::var("NEARPROP_MIN_TESTS_PASSED") {
+        Ok(val) => val.parse().unwrap_or(default),
+        Err(_) => default,
+    }
+}
+
+impl Default for NearProp {
+    fn default() -> Self {
+        let gen = Gen::new(qc_gen_size());
+        let tests = qc_tests();
+        let max_tests = cmp::max(tests, qc_max_tests());
+        let min_tests_passed = qc_min_tests_passed();
+
+        NearProp {
+            tests,
+            max_tests,
+            min_tests_passed,
+            gen,
+        }
+    }
+}
+
+impl NearProp {
+    /// Set the random number generator to be used by NearProp.
+    pub fn gen(self, gen: Gen) -> NearProp {
+        NearProp { gen, ..self }
+    }
+
+    /// Set the number of tests to run.
+    ///
+    /// This actually refers to the maximum number of *passed* tests that
+    /// can occur. Namely, if a test causes a failure, future testing on that
+    /// property stops. Additionally, if tests are discarded, there may be
+    /// fewer than `tests` passed.
+    pub fn tests(mut self, tests: u64) -> NearProp {
+        self.tests = tests;
+        self
+    }
+
+    /// Set the maximum number of tests to run.
+    ///
+    /// The number of invocations of a property will never exceed this number.
+    /// This is necessary to cap the number of tests because NearProp
+    /// properties can discard tests.
+    pub fn max_tests(mut self, max_tests: u64) -> NearProp {
+        self.max_tests = max_tests;
+        self
+    }
+
+    /// Set the minimum number of tests that needs to pass.
+    ///
+    /// This actually refers to the minimum number of *valid* *passed* tests
+    /// that needs to pass for the property to be considered successful.
+    pub fn min_tests_passed(mut self, min_tests_passed: u64) -> NearProp {
+        self.min_tests_passed = min_tests_passed;
+        self
+    }
+
+    /// Tests a property and returns the result.
+    ///
+    /// The result returned is either the number of tests passed or a witness
+    /// of failure.
+    ///
+    /// (If you're using Rust's unit testing infrastructure, then you'll
+    /// want to use the `quickcheck` method, which will `panic!` on failure.)
+    async fn test<A>(&mut self, f: A) -> Result<u64, TestResult>
+    where
+        A: Testable,
+    {
+        // TODO paralellize this
+        let mut n_tests_passed = 0;
+        for _ in 0..self.max_tests {
+            if n_tests_passed >= self.tests {
+                break;
+            }
+            match f.result(&mut self.gen).await {
+                TestResult {
+                    status: Status::Pass,
+                    ..
+                } => n_tests_passed += 1,
+                TestResult {
+                    status: Status::Discard,
+                    ..
+                } => continue,
+                r @ TestResult {
+                    status: Status::Fail,
+                    ..
+                } => return Err(r),
+            }
+        }
+        Ok(n_tests_passed)
+    }
+
+    /// Tests a property and calls `panic!` on failure.
+    ///
+    /// The `panic!` message will include a (hopefully) minimal witness of
+    /// failure.
+    ///
+    /// It is appropriate to use this method with Rust's unit testing
+    /// infrastructure.
+    ///
+    /// Note that if the environment variable `RUST_LOG` is set to enable
+    /// `info` level log messages for the `quickcheck` crate, then this will
+    /// include output on how many NearProp tests were passed.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use near_prop::NearProp;
+    ///
+    /// fn prop_reverse_reverse() {
+    ///     fn revrev(xs: Vec<usize>) -> bool {
+    ///         let rev: Vec<_> = xs.clone().into_iter().rev().collect();
+    ///         let revrev: Vec<_> = rev.into_iter().rev().collect();
+    ///         xs == revrev
+    ///     }
+    ///     NearProp::new().prop_test(revrev as fn(Vec<usize>) -> bool);
+    /// }
+    /// ```
+    pub async fn prop_test<A>(&mut self, f: A)
+    where
+        A: Testable,
+    {
+        // Ignore log init failures, implying it has already been done.
+        let _ = crate::env_logger_init();
+
+        let n_tests_passed = match self.test(f).await {
+            Ok(n_tests_passed) => n_tests_passed,
+            Err(result) => panic!("{}", result.failed_msg()),
+        };
+
+        if n_tests_passed >= self.min_tests_passed {
+            super::info!("(Passed {} NearProp tests.)", n_tests_passed)
+        } else {
+            panic!(
+                "(Unable to generate enough tests, {} not discarded.)",
+                n_tests_passed
+            )
+        }
+    }
+}
+
+/// Convenience function for running NearProp.
+///
+/// This is an alias for `NearProp::new().quickcheck(f)`.
+pub async fn prop<A: Testable>(f: A) {
+    NearProp::default().prop_test(f).await
+}
 
 /// Describes the status of a single instance of a test.
 ///
