@@ -5,7 +5,7 @@ use futures::FutureExt;
 use quickcheck::{Arbitrary, Gen};
 use std::fmt::Debug;
 use std::future::Future;
-use std::panic::{self, UnwindSafe};
+use std::panic;
 use std::pin::Pin;
 
 /// Describes the status of a single instance of a test.
