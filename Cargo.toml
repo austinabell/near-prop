@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+async-recursion = "1.0.0"
+async-trait = "0.1.56"
+futures = "0.3.21"
+quickcheck = "1.0"

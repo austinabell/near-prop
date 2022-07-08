@@ -5,10 +5,10 @@ Property-based testing for NEAR using [workspaces-rs](https://github.com/near/wo
 API goal
 
 ```rust
-prop(async |contract, worker, f: Fuzz /* params? */| {
-  let result = contract.call(worker, "fuzzme").args_json(todo!())?.transact().await?;
+prop(async |contract, worker, f: FuzzData /* params? */| {
+  let result = contract.call(worker, "fuzzme").args_json(f)?.transact().await?;
   Ok(())
-});
+}).await;
 ```
 
 Questions:
