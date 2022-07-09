@@ -10,15 +10,15 @@ use std::{cmp, env, panic};
 
 /// The main NearProp type for setting configuration and running NearProp.
 pub struct NearProp {
-    tests: u64,
-    max_tests: u64,
-    min_tests_passed: u64,
-    gen: Gen,
+    tests: usize,
+    gen_size: usize,
+    max_tests: usize,
+    min_tests_passed: usize,
     // TODO use param
     clear_state: bool,
 }
 
-fn qc_tests() -> u64 {
+fn qc_tests() -> usize {
     let default = 100;
     match env::var("NEARPROP_TESTS") {
         Ok(val) => val.parse().unwrap_or(default),
@@ -26,7 +26,7 @@ fn qc_tests() -> u64 {
     }
 }
 
-fn qc_max_tests() -> u64 {
+fn qc_max_tests() -> usize {
     let default = 10_000;
     match env::var("NEARPROP_MAX_TESTS") {
         Ok(val) => val.parse().unwrap_or(default),
@@ -42,7 +42,7 @@ fn qc_gen_size() -> usize {
     }
 }
 
-fn qc_min_tests_passed() -> u64 {
+fn qc_min_tests_passed() -> usize {
     let default = 0;
     match env::var("NEARPROP_MIN_TESTS_PASSED") {
         Ok(val) => val.parse().unwrap_or(default),
@@ -52,7 +52,7 @@ fn qc_min_tests_passed() -> u64 {
 
 impl Default for NearProp {
     fn default() -> Self {
-        let gen = Gen::new(qc_gen_size());
+        let gen_size = qc_gen_size();
         let tests = qc_tests();
         let max_tests = cmp::max(tests, qc_max_tests());
         let min_tests_passed = qc_min_tests_passed();
@@ -61,16 +61,16 @@ impl Default for NearProp {
             tests,
             max_tests,
             min_tests_passed,
-            gen,
+            gen_size,
             clear_state: false,
         }
     }
 }
 
 impl NearProp {
-    /// Set the random number generator to be used by NearProp.
-    pub fn gen(mut self, gen: Gen) -> Self {
-        self.gen = gen;
+    /// Set the random bytes buffer size.
+    pub fn gen_size(mut self, size: usize) -> Self {
+        self.gen_size = size;
         self
     }
 
@@ -80,7 +80,7 @@ impl NearProp {
     /// can occur. Namely, if a test causes a failure, future testing on that
     /// property stops. Additionally, if tests are discarded, there may be
     /// fewer than `tests` passed.
-    pub fn tests(mut self, tests: u64) -> Self {
+    pub fn tests(mut self, tests: usize) -> Self {
         self.tests = tests;
         self
     }
@@ -90,7 +90,7 @@ impl NearProp {
     /// The number of invocations of a property will never exceed this number.
     /// This is necessary to cap the number of tests because NearProp
     /// properties can discard tests.
-    pub fn max_tests(mut self, max_tests: u64) -> Self {
+    pub fn max_tests(mut self, max_tests: usize) -> Self {
         self.max_tests = max_tests;
         self
     }
@@ -99,7 +99,7 @@ impl NearProp {
     ///
     /// This actually refers to the minimum number of *valid* *passed* tests
     /// that needs to pass for the property to be considered successful.
-    pub fn min_tests_passed(mut self, min_tests_passed: u64) -> Self {
+    pub fn min_tests_passed(mut self, min_tests_passed: usize) -> Self {
         self.min_tests_passed = min_tests_passed;
         self
     }
@@ -117,7 +117,7 @@ impl NearProp {
     ///
     /// The result returned is either the number of tests passed or a witness
     /// of failure.
-    async fn test_inner<A>(&mut self, f: A) -> Result<u64, TestResult>
+    async fn test_inner<A>(&mut self, f: A) -> Result<usize, TestResult>
     where
         A: Testable,
     {
@@ -129,7 +129,10 @@ impl NearProp {
             if n_tests_passed >= self.tests {
                 break;
             }
-            match f.result(&mut self.gen).await {
+
+            // Gen new generates using thread rng, so should be fine to not re-use
+            // as quickcheck does. This is needed to allow calls to be done in parallel.
+            match f.result(&mut Gen::new(self.gen_size)).await {
                 TestResult {
                     status: Status::Pass,
                     ..
