@@ -1,7 +1,11 @@
 [package]
 name = "near-prop"
 version = "0.1.0"
+authors = ["Austin Abell <austinabell8@gmail.com>"]
 edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Property based testing library for NEAR using workspaces-rs"
+repository = "https://github.com/austinabell/near-prop"
 
 [features]
 default = ["regex", "use_logging"]
@@ -18,4 +22,4 @@ quickcheck = "1.0"
 tokio = { version = "1.18", features = ["sync", "rt", "macros"] }
 env_logger = { version = "0.8.2", default-features = false, optional = true }
 log = { version = "0.4", optional = true }
-near-prop-macros = { path = "../near-prop-macros", optional = true }
+near-prop-macros = { version = "0.1", path = "../near-prop-macros", optional = true }
