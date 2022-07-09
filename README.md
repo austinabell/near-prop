@@ -6,17 +6,34 @@ The APIs are an extension of [quickcheck](https://github.com/BurntSushi/quickche
 
 ## Usage
 
+With test macro:
+
 ```rust
-    #[near_prop::test]
-    async fn prop_test_basic(ctx: PropContext, amount: u64) -> anyhow::Result<bool> {
-        let r = ctx.contract
-            .call(&ctx.worker, "add")
-            .args_json((amount,))?
-            .transact()
-            .await?
-            .json::<u64>()?;
-        Ok(r == amount)
-    }
+#[near_prop::test]
+async fn prop_test_basic(ctx: PropContext, amount: u64) -> anyhow::Result<bool> {
+    let r = ctx.contract
+        .call(&ctx.worker, "add")
+        .args_json((amount,))?
+        .transact()
+        .await?
+        .json::<u64>()?;
+    Ok(r == amount)
+}
+```
+
+Without test macro:
+
+```rust
+async fn prop(ctx: PropContext, amount: u64) -> anyhow::Result<bool> {
+    let r = ctx.contract
+        .call(&ctx.worker, "add")
+        .args_json((amount,))?
+        .transact()
+        .await?
+        .json::<u64>()?;
+    Ok(r == amount)
+}
+prop_test(prop as fn(PropContext, _) -> _).await;
 ```
 
 This will by default compile the current directory's library and run until 100 tests pass. These tests will be run in parallel.
