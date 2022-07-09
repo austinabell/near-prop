@@ -9,6 +9,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::{cmp, env, panic};
 use tokio::sync::mpsc;
+use workspaces::network::{DevAccountDeployer, Sandbox};
+use workspaces::{Contract, Worker};
 
 /// The main NearProp type for setting configuration and running NearProp.
 pub struct NearProp {
@@ -16,8 +18,6 @@ pub struct NearProp {
     gen_size: usize,
     max_tests: usize,
     min_tests_passed: usize,
-    // TODO use param
-    clear_state: bool,
 }
 
 fn qc_tests() -> usize {
@@ -64,7 +64,6 @@ impl Default for NearProp {
             max_tests,
             min_tests_passed,
             gen_size,
-            clear_state: false,
         }
     }
 }
@@ -106,15 +105,6 @@ impl NearProp {
         self
     }
 
-    /// Configures if state is cleared for each individual test.
-    ///
-    /// This actually refers to the minimum number of *valid* *passed* tests
-    /// that needs to pass for the property to be considered successful.
-    pub fn clear_state(mut self, clear: bool) -> Self {
-        self.clear_state = clear;
-        self
-    }
-
     /// Tests a property and returns the result.
     ///
     /// The result returned is either the number of tests passed or a witness
@@ -123,6 +113,9 @@ impl NearProp {
     where
         A: Testable + Send + Sync,
     {
+        // Compile code to avoid duplication across tasks.
+        let wasm = Arc::new(workspaces::compile_project("./").await.unwrap());
+
         let (tx, mut rx) = mpsc::channel::<TestResult>(self.tests);
         let f = Arc::new(f);
 
@@ -131,10 +124,16 @@ impl NearProp {
             let gen_size = self.gen_size;
             let sender = tx.clone();
             let func = Arc::clone(&f);
+            let w_cloned = Arc::clone(&wasm);
             tokio::spawn(async move {
+                let worker = workspaces::sandbox().await.unwrap();
+                let contract = Arc::new(worker.dev_deploy(&w_cloned).await.unwrap());
+
+                let ctx = PropContext { contract, worker };
+
                 // New randomness `Gen` for every result execution. Internally this uses thread rng
                 // so this should be roughly equivalent to re-using as quickcheck does.
-                let result = func.result(&mut Gen::new(gen_size)).await;
+                let result = func.result(ctx, &mut Gen::new(gen_size)).await;
                 sender.send(result).await.expect("test result channel full");
             });
         };
@@ -235,6 +234,13 @@ impl NearProp {
 /// This is an alias for `NearProp::default().test(f)`.
 pub async fn prop_test<A: Testable + Send + Sync>(f: A) {
     NearProp::default().test(f).await
+}
+
+/// Context provided to the testable functions to generate results.
+#[derive(Clone)]
+pub struct PropContext {
+    pub contract: Arc<Contract>,
+    pub worker: Worker<Sandbox>,
 }
 
 /// Describes the status of a single instance of a test.
@@ -351,26 +357,28 @@ impl TestResult {
 /// It's unlikely that you'll have to implement this trait yourself.
 #[async_trait]
 pub trait Testable: 'static {
-    async fn result(&self, _: &mut Gen) -> TestResult;
+    // TODO experiment if possible to make context a reference. Seems possible but
+    // TODO might not be possible with lifetimes.
+    async fn result(&self, _: PropContext, _: &mut Gen) -> TestResult;
 }
 
 #[async_trait]
 impl Testable for bool {
-    async fn result(&self, _: &mut Gen) -> TestResult {
+    async fn result(&self, _: PropContext, _: &mut Gen) -> TestResult {
         TestResult::from_bool(*self)
     }
 }
 
 #[async_trait]
 impl Testable for () {
-    async fn result(&self, _: &mut Gen) -> TestResult {
+    async fn result(&self, _: PropContext, _: &mut Gen) -> TestResult {
         TestResult::passed()
     }
 }
 
 #[async_trait]
 impl Testable for TestResult {
-    async fn result(&self, _: &mut Gen) -> TestResult {
+    async fn result(&self, _: PropContext, _: &mut Gen) -> TestResult {
         self.clone()
     }
 }
@@ -382,6 +390,7 @@ where
 {
     fn result<'l0, 'l1, 'at>(
         &'l0 self,
+        c: PropContext,
         g: &'l1 mut Gen,
     ) -> Pin<Box<dyn Future<Output = TestResult> + Send + 'at>>
     where
@@ -390,7 +399,7 @@ where
         Self: 'at,
     {
         match *self {
-            Ok(ref r) => r.result(g),
+            Ok(ref r) => r.result(c, g),
             Err(ref err) => Box::pin(async move { TestResult::error(format!("{:?}", err)) }),
         }
     }
@@ -405,13 +414,13 @@ macro_rules! testable_fn {
     ($($name: ident),*) => {
 
 #[async_trait]
-impl<T, R, $($name: Arbitrary + Debug + Send + Sync),*> Testable for fn($($name),*) -> R
+impl<T, R, $($name: Arbitrary + Debug + Send + Sync),*> Testable for fn(PropContext, $($name),*) -> R
 where
     T: Testable + Send + Sync,
     R: Future<Output = T> + 'static + Send,
 {
     #[allow(non_snake_case)]
-    async fn result(&self, g: &mut Gen) -> TestResult {
+    async fn result(&self, ctx: PropContext, g: &mut Gen) -> TestResult {
         #[async_recursion]
         async fn shrink_failure<
             T: Testable + Send + Sync,
@@ -419,7 +428,8 @@ where
             $($name: Arbitrary + Debug + Send + Sync),*
         >(
             g: &mut Gen,
-            self_: fn($($name),*) -> R,
+            self_: fn(PropContext, $($name),*) -> R,
+            ctx: PropContext,
             a: ($($name,)*),
         ) -> Option<TestResult>
         where
@@ -428,9 +438,11 @@ where
             let shrunk = a.shrink().collect::<Vec<_>>();
             for t in shrunk {
                 let ($($name,)*) = t.clone();
-                let mut r_new = safe_async(async move || self_($($name,)*).await)
+                // FIXME: clear contract storage when shrinking data for failures.
+                let c_cloned = ctx.clone();
+                let mut r_new = safe_async(async move || self_(c_cloned, $($name,)*).await)
                     .await
-                    .result(g)
+                    .result(ctx.clone(), g)
                     .await;
                 if r_new.is_failure() {
                     {
@@ -440,7 +452,7 @@ where
 
                     // The shrunk value *does* witness a failure, so keep
                     // trying to shrink it.
-                    let shrunk = shrink_failure(g, self_, t).await;
+                    let shrunk = shrink_failure(g, self_, ctx, t).await;
 
                     // If we couldn't witness a failure on any shrunk value,
                     // then return the failure we already have.
@@ -453,9 +465,10 @@ where
         let self_ = *self;
         let a: ($($name,)*) = Arbitrary::arbitrary(g);
         let ($($name,)*) = a.clone();
-        let mut r = safe_async(async move || self_($($name),*).await)
+        let c_cloned = ctx.clone();
+        let mut r = safe_async(async move || self_(c_cloned, $($name),*).await)
             .await
-            .result(g)
+            .result(ctx.clone(), g)
             .await;
 
         {
@@ -464,7 +477,7 @@ where
         }
         match r.status {
             Status::Pass | Status::Discard => r,
-            Status::Fail => shrink_failure(g, self_, a).await.unwrap_or(r),
+            Status::Fail => shrink_failure(g, self_, ctx, a).await.unwrap_or(r),
         }
     }
 }

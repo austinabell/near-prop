@@ -3,7 +3,7 @@
 mod runner;
 
 pub use quickcheck::{Arbitrary, Gen};
-pub use runner::{prop_test, NearProp, TestResult, Testable};
+pub use runner::{prop_test, NearProp, PropContext, TestResult, Testable};
 
 #[cfg(feature = "use_logging")]
 fn env_logger_init() -> Result<(), log::SetLoggerError> {

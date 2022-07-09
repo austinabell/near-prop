@@ -1666,6 +1666,7 @@ dependencies = [
  "log",
  "quickcheck",
  "tokio",
+ "workspaces",
 ]
 
 [[package]]

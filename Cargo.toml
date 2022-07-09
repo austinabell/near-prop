@@ -13,6 +13,7 @@ regex = ["env_logger/regex"]
 
 [dependencies]
 async-recursion = "1.0.0"
+workspaces = { version = "0.3.1", features = ["unstable"] }
 async-trait = "0.1.56"
 futures = "0.3.21"
 quickcheck = "1.0"
