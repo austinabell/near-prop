@@ -1,11 +1,15 @@
 [package]
 name = "near-prop-macros"
 version = "0.1.0"
+authors = ["Austin Abell <austinabell8@gmail.com>"]
 edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Macros for near-prop testing library"
+repository = "https://github.com/austinabell/near-prop"
 
 [lib]
 proc-macro = true
 
 [dependencies]
-syn = "1.0"
+syn = { version = "1.0", features = ["full"] }
 quote = "1.0"
