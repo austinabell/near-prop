@@ -1665,6 +1665,7 @@ dependencies = [
  "futures",
  "log",
  "quickcheck",
+ "tokio",
 ]
 
 [[package]]

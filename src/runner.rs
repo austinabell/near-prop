@@ -6,7 +6,9 @@ use quickcheck::{Arbitrary, Gen};
 use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::{cmp, env, panic};
+use tokio::sync::mpsc;
 
 /// The main NearProp type for setting configuration and running NearProp.
 pub struct NearProp {
@@ -119,35 +121,63 @@ impl NearProp {
     /// of failure.
     async fn test_inner<A>(&mut self, f: A) -> Result<usize, TestResult>
     where
-        A: Testable,
+        A: Testable + Send + Sync,
     {
-        // TODO paralellize this
-        let mut n_tests_passed = 0;
-        for i in 0..self.max_tests {
-            // TODO remove, used for debugging
-            super::info!("RAN TEST {}", i);
-            if n_tests_passed >= self.tests {
-                break;
-            }
+        let (tx, mut rx) = mpsc::channel::<TestResult>(self.tests);
+        let f = Arc::new(f);
 
-            // Gen new generates using thread rng, so should be fine to not re-use
-            // as quickcheck does. This is needed to allow calls to be done in parallel.
-            match f.result(&mut Gen::new(self.gen_size)).await {
+        let mut tests_scheduled = 0;
+        let spawn_test_check = || {
+            let gen_size = self.gen_size;
+            let sender = tx.clone();
+            let func = Arc::clone(&f);
+            tokio::spawn(async move {
+                // New randomness `Gen` for every result execution. Internally this uses thread rng
+                // so this should be roughly equivalent to re-using as quickcheck does.
+                let result = func.result(&mut Gen::new(gen_size)).await;
+                sender.send(result).await.expect("test result channel full");
+            });
+        };
+
+        let mut passes_remaining = self.tests;
+        // Spawn enough tasks to complete all tests
+        for _ in 0..passes_remaining {
+            spawn_test_check();
+            tests_scheduled += 1;
+        }
+
+        // Poll channel of results until enough passes or max tests is hit
+        while let Some(r) = rx.recv().await {
+            match r {
                 TestResult {
                     status: Status::Pass,
                     ..
-                } => n_tests_passed += 1,
+                } => {
+                    passes_remaining -= 1;
+                    if passes_remaining == 0 {
+                        // Sufficient amount of passes.
+                        break;
+                    }
+                }
                 TestResult {
                     status: Status::Discard,
                     ..
-                } => continue,
+                } => {
+                    if tests_scheduled >= self.max_tests {
+                        // Max tests hit.
+                        break;
+                    }
+                    spawn_test_check();
+                    tests_scheduled += 1;
+                }
                 r @ TestResult {
                     status: Status::Fail,
                     ..
                 } => return Err(r),
             }
         }
-        Ok(n_tests_passed)
+
+        Ok(self.tests - passes_remaining)
     }
 
     /// Tests a property and calls `panic!` on failure.
@@ -179,7 +209,7 @@ impl NearProp {
     /// ```
     pub async fn test<A>(&mut self, f: A)
     where
-        A: Testable,
+        A: Testable + Send + Sync,
     {
         // Ignore log init failures, implying it has already been done.
         let _ = crate::env_logger_init();
@@ -203,7 +233,7 @@ impl NearProp {
 /// Convenience function for running NearProp.
 ///
 /// This is an alias for `NearProp::default().test(f)`.
-pub async fn prop_test<A: Testable>(f: A) {
+pub async fn prop_test<A: Testable + Send + Sync>(f: A) {
     NearProp::default().test(f).await
 }
 

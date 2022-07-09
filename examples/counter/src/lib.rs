@@ -34,7 +34,7 @@ mod tests {
                 .json::<u64>()?;
             Ok(TestResult::from_bool(r == amount))
         }
-        NearProp::default().tests(10).test(prop as fn(_) -> _).await;
+        NearProp::default().tests(20).test(prop as fn(_) -> _).await;
         // prop_test(prop as fn(_) -> _).await;
         Ok(())
     }
