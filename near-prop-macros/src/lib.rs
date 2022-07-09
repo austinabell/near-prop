@@ -2,7 +2,7 @@ use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
     parse_macro_input, punctuated::Punctuated, token::Comma, AttributeArgs, Error, ItemFn,
-    NestedMeta, 
+    NestedMeta,
 };
 
 /// Mark an async function to be fuzz-tested using [near-prop], within a tokio
