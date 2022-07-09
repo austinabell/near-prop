@@ -1664,9 +1664,18 @@ dependencies = [
  "env_logger",
  "futures",
  "log",
+ "near-prop-macros",
  "quickcheck",
  "tokio",
  "workspaces",
+]
+
+[[package]]
+name = "near-prop-macros"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn",
 ]
 
 [[package]]

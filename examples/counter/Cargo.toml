@@ -18,7 +18,7 @@ panic = "abort"
 near-sdk = "4.0"
 
 [dev-dependencies]
-near-prop = { path = "../../near-prop" }
+near-prop = { path = "../../near-prop", features = ["macros"] }
 tokio = { version = "1.18", features = ["full"] }
 anyhow = "1.0"
 workspaces = { version = "0.3.1", features = ["unstable"] }

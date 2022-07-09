@@ -2,20 +2,28 @@
 
 Property-based testing for NEAR using [workspaces-rs](https://github.com/near/workspaces-rs).
 
-API goal
+The APIs are an extension of [quickcheck](https://github.com/BurntSushi/quickcheck) which is used for generating data and shrinking data to find minimal failures.
+
+## Usage
 
 ```rust
-prop(async |contract, worker, f: FuzzData /* params? */| {
-  let result = contract.call(worker, "fuzzme").args_json(f)?.transact().await?;
-  Ok(())
-}).await;
+    #[near_prop::test]
+    async fn prop_test_basic(ctx: PropContext, amount: u64) -> anyhow::Result<bool> {
+        let r = ctx.contract
+            .call(&ctx.worker, "add")
+            .args_json((amount,))?
+            .transact()
+            .await?
+            .json::<u64>()?;
+        Ok(r == amount)
+    }
 ```
 
-Questions:
-- How should project be compiled (default to current and override with a path to wasm file?)
-- Stateful or stateless transactions?
-  - Probably stateful, but might be nice to express clearing state or re-deploying after x txs
-- Allow fuzzing random inputs
-  - Could possibly take all function names and fuzz them with random data
-- How to handle transfers going over capacity of dev accounts?
-- How to handle multi-tx tests?
+This will by default compile the current directory's library and run until 100 tests pass. These tests will be run in parallel.
+
+See more examples [here](https://github.com/austinabell/near-prop/tree/main/examples/)
+
+Future functionality:
+- [ ] Allow overriding wasm file or cargo manifest directory
+- [ ] Allow re-using contract with prop tests
+- [ ] Integration with contract ABI (automatic fuzzing of methods?)

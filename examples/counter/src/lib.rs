@@ -22,6 +22,26 @@ mod tests {
     use near_prop::{prop_test, PropContext};
     use workspaces::prelude::*;
 
+    #[near_prop::test]
+    async fn prop_test_macro(ctx: PropContext, a: (u64, u64, u64, u64)) -> anyhow::Result<()> {
+        let mut acc: u64 = 0;
+        // Quickcheck arbitrary doesn't support arrays, so this is a hack around this.
+        for amount in [a.0, a.1, a.2, a.3] {
+            let r = ctx.contract
+                .call(&ctx.worker, "add")
+                .args_json((amount,))?
+                .transact()
+                .await?
+                .json::<u64>()?;
+            acc = acc.saturating_add(amount);
+            if acc != r {
+                anyhow::bail!("Invalid value returned, expected {} got {}", acc, r);
+            }
+        }
+        Ok(())
+    }
+
+    #[ignore]
     #[tokio::test]
     async fn prop_test_add() {
         async fn prop(ctx: PropContext, a: (u64, u64, u64, u64)) -> anyhow::Result<()> {
@@ -43,6 +63,18 @@ mod tests {
             Ok(())
         }
         prop_test(prop as fn(PropContext, _) -> _).await;
+    }
+
+    #[ignore]
+    #[near_prop::test]
+    async fn prop_test_basic(ctx: PropContext, amount: u64) -> anyhow::Result<bool> {
+        let r = ctx.contract
+            .call(&ctx.worker, "add")
+            .args_json((amount,))?
+            .transact()
+            .await?
+            .json::<u64>()?;
+        Ok(r == amount)
     }
 
     #[tokio::test]
