@@ -10,8 +10,9 @@ pub struct StatusMessage {
 #[near_bindgen]
 impl StatusMessage {
     pub fn add(&mut self, amount: u64) -> u64 {
-        self.count += amount;
-        // self.count = self.count.saturating_add(amount);
+        // Switch these statements for the prop test to pick up the bug
+        // self.count += amount;
+        self.count = self.count.saturating_add(amount);
         self.count
     }
 }
@@ -50,8 +51,7 @@ mod tests {
         let worker = workspaces::sandbox().await?;
         let contract = worker.dev_deploy(&wasm).await?;
         let mut acc: u64 = 0;
-        // Quickcheck arbitrary doesn't support arrays, so this is a hack around this.
-        for amount in [0, 0, 0, 0] {
+        for amount in [9, 100, 987_198_987, 563_324_354_295] {
             let r = contract
                 .call(&worker, "add")
                 .args_json((amount,))?
