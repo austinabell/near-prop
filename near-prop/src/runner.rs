@@ -1,6 +1,7 @@
 use async_recursion::async_recursion;
 use async_trait::async_trait;
-use futures::FutureExt;
+use futures::stream::FuturesUnordered;
+use futures::{FutureExt, StreamExt};
 // TODO remove reference directly to the quickcheck types, used in public API
 use quickcheck::{Arbitrary, Gen};
 use std::fmt::Debug;
@@ -8,7 +9,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::{cmp, env, panic};
-use tokio::sync::mpsc;
 use workspaces::network::{DevAccountDeployer, Sandbox};
 use workspaces::{Contract, Worker};
 
@@ -116,16 +116,15 @@ impl NearProp {
         // Compile code to avoid duplication across tasks.
         let wasm = Arc::new(workspaces::compile_project("./").await.unwrap());
 
-        let (tx, mut rx) = mpsc::channel::<TestResult>(self.tests);
+        let mut futs = FuturesUnordered::new();
         let f = Arc::new(f);
 
         let mut tests_scheduled = 0;
-        let spawn_test_check = || {
+        let spawn_test_check = |futs: &FuturesUnordered<_>| {
             let gen_size = self.gen_size;
-            let sender = tx.clone();
             let func = Arc::clone(&f);
             let w_cloned = Arc::clone(&wasm);
-            tokio::spawn(async move {
+            futs.push(async move {
                 let worker = workspaces::sandbox().await.unwrap();
                 let contract = Arc::new(worker.dev_deploy(&w_cloned).await.unwrap());
 
@@ -133,20 +132,19 @@ impl NearProp {
 
                 // New randomness `Gen` for every result execution. Internally this uses thread rng
                 // so this should be roughly equivalent to re-using as quickcheck does.
-                let result = func.result(ctx, &mut Gen::new(gen_size)).await;
-                sender.send(result).await.expect("test result channel full");
+                func.result(ctx, &mut Gen::new(gen_size)).await
             });
         };
 
         let mut passes_remaining = self.tests;
         // Spawn enough tasks to complete all tests
         for _ in 0..passes_remaining {
-            spawn_test_check();
+            spawn_test_check(&futs);
             tests_scheduled += 1;
         }
 
         // Poll channel of results until enough passes or max tests is hit
-        while let Some(r) = rx.recv().await {
+        while let Some(r) = futs.next().await {
             match r {
                 TestResult {
                     status: Status::Pass,
@@ -166,7 +164,7 @@ impl NearProp {
                         // Max tests hit.
                         break;
                     }
-                    spawn_test_check();
+                    spawn_test_check(&futs);
                     tests_scheduled += 1;
                 }
                 r @ TestResult {
