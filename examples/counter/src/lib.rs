@@ -65,18 +65,6 @@ mod tests {
         prop_test(prop as fn(PropContext, _) -> _).await;
     }
 
-    #[ignore]
-    #[near_prop::test]
-    async fn prop_test_basic(ctx: PropContext, amount: u64) -> anyhow::Result<bool> {
-        let r = ctx.contract
-            .call(&ctx.worker, "add")
-            .args_json((amount,))?
-            .transact()
-            .await?
-            .json::<u64>()?;
-        Ok(r == amount)
-    }
-
     #[tokio::test]
     async fn ws() -> anyhow::Result<()> {
         let wasm = workspaces::compile_project("./").await?;
